@@ -10,6 +10,7 @@ import { store } from './store.ts'
 import { canEditCanvas } from './access.ts'
 import { isBanned } from './auth.ts'
 import { onFeedback } from './resident.ts'
+import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
 
 export const localAgentRouter = Router()
 /* an alias or a pinned claude-* id (the shell checks the shape again before
@@ -48,35 +49,74 @@ function wake(userId: string) {
 
 // POST: polling claims a run and is prohibited in read-only impersonation sessions.
 localAgentRouter.post('/poll', (req, res, next) => {
+  poll(req.user!.id, req, res).catch(next)
+})
+
+localAgentRouter.post('/finish/:id', (req, res, next) => {
+  finish(req.user!.id, req, res).catch(next)
+})
+
+async function poll(userId: string, req: Request, res: Response) {
   const parsed = deviceSchema.safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid device' })
     return
   }
-  void (async () => {
-    const userId = req.user!.id
-    const preference = await getLocalAgentPreference(userId)
-    if (!preference.enabled) {
-      res.json({ job: null, enabled: false })
-      return
-    }
-    const wasOnline = localAgentRuns.online(userId)
-    const job = localAgentRuns.poll(userId, parsed.data.deviceId)
-    res.json({ job, enabled: true })
-    if (!wasOnline) wake(userId)
-  })().catch(next)
-})
+  const preference = await getLocalAgentPreference(userId)
+  if (!preference.enabled) {
+    res.json({ job: null, enabled: false })
+    return
+  }
+  const wasOnline = localAgentRuns.online(userId)
+  const job = localAgentRuns.poll(userId, parsed.data.deviceId)
+  res.json({ job, enabled: true })
+  if (!wasOnline) wake(userId)
+}
 
-localAgentRouter.post('/finish/:id', (req, res, next) => {
+async function finish(userId: string, req: Request, res: Response) {
   const parsed = deviceSchema.extend({ success: z.boolean(), text: z.string().max(100_000) }).safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid result' })
     return
   }
-  localAgentRuns
-    .finish(req.params.id!, req.user!.id, parsed.data.deviceId, parsed.data)
-    .then((ok) => res.status(ok ? 200 : 409).json({ ok }))
+  const ok = await localAgentRuns.finish(req.params.id!, userId, parsed.data.deviceId, parsed.data)
+  res.status(ok ? 200 : 409).json({ ok })
+}
+
+/**
+ * The same relay for a headless runner (scripts/claude-runner.mjs): a machine
+ * with a Claude Code login and no browser session, so it authenticates with
+ * one of the account's agent keys. A key already acts as its owner on /mcp,
+ * so claiming that owner's queued runs grants nothing new. Mounted ahead of
+ * the /api session gate.
+ */
+export const localRunnerRouter = Router()
+
+localRunnerRouter.use((req, res, next) => {
+  const bearer = req.headers.authorization?.replace(/^Bearer /, '') ?? ''
+  void (async () => {
+    const key = isAgentKeySecret(bearer) ? await verifyAgentKey(bearer) : null
+    if (!key || (await isBanned(key.userId))) {
+      res.status(401).json({ error: 'Invalid agent key' })
+      return
+    }
+    res.locals.userId = key.userId
+    next()
+  })().catch(next)
+})
+
+localRunnerRouter.get('/', (_req, res, next) => {
+  getLocalAgentPreference(res.locals.userId as string)
+    .then((preference) => res.json(preference))
     .catch(next)
+})
+
+localRunnerRouter.post('/poll', (req, res, next) => {
+  poll(res.locals.userId as string, req, res).catch(next)
+})
+
+localRunnerRouter.post('/finish/:id', (req, res, next) => {
+  finish(res.locals.userId as string, req, res).catch(next)
 })
 
 localAgentRouter.post('/stop', (req, res, next) => {

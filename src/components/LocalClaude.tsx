@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { api } from '../lib/api'
+import { useStore } from '../lib/store'
 import { isDesktopShell } from '../lib/shell'
 import {
   disconnectLocalAgent,
@@ -20,6 +21,7 @@ import {
   type ClaudeEffort,
   type ClaudeModel,
   type ClaudeModelAlias,
+  type LocalAgentPreference,
 } from '../../shared/localAgent'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { Button } from './ui/button'
@@ -113,6 +115,118 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
   )
 }
 
+/** The plan as a browser sees it with a headless runner (scripts/claude-runner.mjs)
+ *  polling for this account: the server routes runs to it, so the row only
+ *  saves the preference. Sign-in and the CLI itself live on the runner's machine. */
+function RunnerClaudeRow({ userId }: { userId: string }) {
+  const t = useT()
+  const modelName = useModelName()
+  const preference = useLocalAgent((s) => s.preference) as (LocalAgentPreference & { online?: boolean }) | null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refreshLocalAgent(userId).catch(() => {})
+    }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [userId])
+  const active = preference?.enabled ?? false
+  const online = preference?.online ?? false
+  const selectedModel = normalizeClaudeModel(preference?.model)
+  const selectedEffort = preference?.effort
+  const save = (next: Partial<LocalAgentPreference>) => {
+    setBusy(true)
+    setError('')
+    const merged = { enabled: active, model: selectedModel, effort: selectedEffort, ...next }
+    api
+      .setLocalAgent({
+        enabled: merged.enabled,
+        model: merged.model,
+        ...(merged.effort ? { effort: merged.effort } : {}),
+      })
+      .then(() => refreshLocalAgent(userId))
+      .then(() => useStore.getState().allowanceChanged())
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <section aria-label={t('models.claudePlanRunnerAria')} className={planRow(active)}>
+      <span aria-hidden="true" className={planMark(active)}>
+        <AgentIcon name="claude" size={20} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
+          <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
+            {t('models.claudePlan')}
+          </h3>
+          <span className={planPill(online)}>
+            {online ? (active ? t('models.activeConnected') : t('models.connected')) : t('models.notConnected')}
+          </span>
+          <span className={cn(planPill(false), 'bg-paper-deep text-ink-soft')}>{t('models.headlessRunner')}</span>
+        </div>
+        <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">{t('models.runnerLede')}</p>
+        <div className={actionsRow}>
+          <ToggleChipGroup
+            aria-label={t('models.claudeModelAria')}
+            value={selectedModel}
+            disabled={busy}
+            onValueChange={(model) => save({ enabled: true, model })}
+          >
+            {CLAUDE_MODELS.map((model) => (
+              <ToggleChipItem key={model.id} value={model.id} title={t(MODEL_BLURBS[model.id])}>
+                {model.id === selectedModel && (
+                  <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
+                )}
+                {modelName(model)}
+              </ToggleChipItem>
+            ))}
+          </ToggleChipGroup>
+          <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+            {active ? (
+              <>
+                <Button disabled={busy} onClick={() => api.stopLocalAgent().catch((e: unknown) => setError(String(e)))}>
+                  {t('models.stopTask')}
+                </Button>
+                <Button variant="danger" disabled={busy} onClick={() => save({ enabled: false })}>
+                  {t('models.disconnect')}
+                </Button>
+              </>
+            ) : (
+              <Button disabled={busy || !online} onClick={() => save({ enabled: true })}>
+                {t('models.useInstead')}
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-[13px] text-ink-soft">{t('models.reasoningEffort')}</span>
+          <Segmented
+            aria-label={t('models.reasoningEffort')}
+            value={selectedEffort ?? 'default'}
+            disabled={busy}
+            onValueChange={(effort) => save({ effort: effort === 'default' ? undefined : (effort as ClaudeEffort) })}
+          >
+            <SegmentedItem value="default" title={t('models.effortDefaultBlurb')}>
+              {t('models.effortDefault')}
+            </SegmentedItem>
+            {CLAUDE_EFFORT_OPTIONS.map((effort) => (
+              <SegmentedItem key={effort.id} value={effort.id} title={t(EFFORT_LABELS[effort.id].blurb)}>
+                {t(EFFORT_LABELS[effort.id].name)}
+              </SegmentedItem>
+            ))}
+          </Segmented>
+        </div>
+        {active && !online && <p className="mt-[10px] text-[13px] text-ink-faint">{t('models.runnerWaiting')}</p>}
+        {error && (
+          <p role="alert" className="mt-[10px] text-[12.5px] text-accent-ink">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export function LocalClaudeRow() {
   const t = useT()
   const modelName = useModelName()
@@ -179,7 +293,10 @@ export function LocalClaudeRow() {
       await refreshLocalAgent(userId!)
     })
 
-  if (!isDesktopShell()) return <DesktopOnlyClaudeRow active={active} />
+  if (!isDesktopShell()) {
+    const online = (preference as { online?: boolean } | null)?.online
+    return userId && (online || active) ? <RunnerClaudeRow userId={userId} /> : <DesktopOnlyClaudeRow active={active} />
+  }
 
   return (
     <section className={planRow(active)}>

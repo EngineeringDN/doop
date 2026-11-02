@@ -291,7 +291,8 @@ export const api = {
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
   setNotificationPrefs: (prefs: NotificationPrefs) =>
     req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
-  localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
+  /** `online`: some device (the desktop app or a headless runner) polled for this account in the last 30 s */
+  localAgent: () => req<LocalAgentPreference & { online?: boolean }>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),
   pollLocalAgent: (deviceId: string) =>

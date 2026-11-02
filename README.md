@@ -405,6 +405,14 @@ the operator or the desktop app provides them:
 - **Claude Plan (desktop app)** — the Doop desktop app runs the Doop Agent through the user's own
   local Claude Code login (`claude -p`), with a per-run scoped MCP token. Once switched on it takes
   precedence over connected accounts while the app is online. Setup: [`desktop/README.md`](desktop/README.md#local-claude-cli).
+- **Claude Plan (headless runner)** — the same relay without the desktop app, for a server or
+  always-on machine that has a Claude Code login. Create an agent key in Settings, then run
+  `DOOP_URL=https://your-doop DOOP_AGENT_KEY_FILE=~/.config/doop/agent-key node scripts/claude-runner.mjs`
+  there (Node 18+, no dependencies; `CLAUDE_BIN` overrides the `claude` on `PATH`). While it polls,
+  Settings → Doop Agent in any browser shows a **Claude Plan · Headless runner** row to switch it on
+  and pick the model and effort. It authenticates on `/local-agent/runner/*` with the key and runs
+  `claude -p` exactly as the desktop does: only the run's canvas-scoped Doop MCP tools, no shell or
+  file tools, no user settings or hooks, and inherited API-key variables stripped.
 
 The ChatGPT, OpenAI, Claude and Gemini kinds get their model menu from the provider's own
 catalog, asked with that account's credential when the picker opens (`server/modelCatalog.ts`,

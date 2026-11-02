@@ -3,7 +3,7 @@ import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
-import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
+import { localAgentRouter, localRunnerRouter, handleLocalAgentMcp } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -554,6 +554,7 @@ app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
 app.all('/local-agent/mcp/:id', (req, res, next) => {
   handleLocalAgentMcp(req, res).catch(next)
 })
+app.use('/local-agent/runner', localRunnerRouter)
 
 /* Where a brand-new account lands: the canvas signup created for it
    (server/auth.ts databaseHooks), where the demo agent is waiting to

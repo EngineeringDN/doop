@@ -83,6 +83,11 @@ export const models: Catalog['models'] = {
   desktopApp: 'App para desktop',
   claudePlanLede: 'Use sua assinatura do Claude localmente.',
   waitingDesktop: 'Aguardando um desktop conectado.',
+  headlessRunner: 'Runner sem interface',
+  claudePlanRunnerAria: 'Claude Plan — runner sem interface',
+  runnerLede:
+    'Uma máquina rodando scripts/claude-runner.mjs com sua chave de agente executa o Doop Agent com o login do Claude Code dela.',
+  runnerWaiting: 'Aguardando o runner. Verifique se o serviço dele está rodando.',
   useInDesktop: 'Use este plano no app do Doop para desktop.',
   downloadDesktop: 'Baixar app para desktop',
   claudeDefaultModel: 'Padrão do Claude Code',
